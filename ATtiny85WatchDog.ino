@@ -8,7 +8,8 @@
  * Timer 1 Clock    : "CPU"
  * millis()/micros(): "Enabled"
  * 
- * #elif defined(__AVR_ATtiny85__)
+ * Arduino IDE version 1.8.12
+ * 
  * ATMEL ATTINY85
  *                        +--\/--+
  *             RESET PB5 1|      |8 VCC
@@ -23,32 +24,33 @@
  *  ------------+---------+---------------+------------------------------------
  *  Power On    | Blink   | Blink         | inversed from each other
  *              |         |               | Relays "Off"
+ *              |         |               | Next: "Fase 1"
  *  ------------+---------+---------------+------------------------------------
- *  Init 1      | Off     | 900 MS On     | repeat for 10 seconds
+ *  Fase 1      | Off     | 900 MS On     | repeat for 25 seconds
  *              |         | 100 MS Off    | Relays "Off"
+ *              |         |               | Next: "Fase 2"
  *  ------------+---------+---------------+------------------------------------
- *  Init 2      | On      |               | Relays "On"          
+ *  Fase 2      | Off     | 500 MS On     | wait for 3 Feeds to pass
+ *              |         | for every     | Relays "Off" 
+ *              |         | Feed received | Next: "Fase 3"
  *  ------------+---------+---------------+------------------------------------
- *  Init 3      | On      | 100 MS On     | repeat for 20 seconds 
- *              |         | 900 MS Off    | Relays are "On" 
- *  ------------+---------+---------------+------------------------------------
- *  Init 4      | On      | 500 MS On     | wait for 10 Feeds to pass
- *              |         | for every     | Relays "On" 
- *              |         | Feed received | 
+ *  Fase 3      | Off     | Blink Fast!   | wait for 3 Feeds to pass
+ *              |         | for 2 seconds | Relays "Off" 
+ *              |         |               | Next: "Normal Operation"
  *  ------------+---------+---------------+------------------------------------
  *  Normal      | On      | 500 MS On     | Relays "On"  
  *  Operation   |         | for every     | 
  *              |         | feed received | 
  *              |         +---------------+------------------------------------
  *              |         | Blink fast    | If no feed within 2 seconds: 
- *              |         |               | "Alarm State" 
+ *              |         |               | Next: "Alarm State" 
  *              |         |               | else: "Normal Operation"
  *              |         |               | Relays "On"
  *  ------------+---------+---------------+------------------------------------
  *  Alarm State | Off     | Off           | Relays "Off"
  *              |         |               | Reset ESP8266
  *              |         |               | Restart ATtinyWatchDog to 
- *              |         |               | "Power On" state
+ *              |         |               | Next: "Power On" state
  *  ------------+---------+---------------+------------------------------------
  *  
 */
@@ -56,39 +58,32 @@
 // https://github.com/GreyGnome/EnableInterrupt
 #include <EnableInterrupt.h>
 
-#define _PIN_SGNL_LED       0       // GPIO-00 ==> DIL-5 ==> PB0
-#define _PIN_INTERRUPT      2       // GPIO-02 ==> DIL-7 ==> PB2  / INT0
-#define _PIN_RST_ESP        3       // GPIO-03 ==> DIL-2 ==> PB3
-#define _PIN_RELAYS         4       // GPIO-04 ==> DIL-3 ==> PB4
-#define _PIN_REL_LED        1       // GPIO-01 ==> DIL-6 ==> PB1
+#define _PIN_SGNL_LED         0       // GPIO-00 ==> DIL-5 ==> PB0
+#define _PIN_INTERRUPT        2       // GPIO-02 ==> DIL-7 ==> PB2  / INT0
+#define _PIN_RST_ESP          3       // GPIO-03 ==> DIL-2 ==> PB3
+#define _PIN_RELAYS           4       // GPIO-04 ==> DIL-3 ==> PB4
+#define _PIN_REL_LED          1       // GPIO-01 ==> DIL-6 ==> PB1
 
-#define _HALF_A_SECOND    500       // half a second
-#define _MAX_HALF_SECONDS  40       // Max 20 seconds elapse befoure WDT kicks in!
-#define _GLOW_TIME        500       // MilliSeconds
+#define _HALF_A_SECOND      500       // half a second
+#define _MAX_HALF_SECONDS    40       // Max 20 seconds elapse befoure WDT kicks in!
+#define _STARTUP_TIME     25000       // 25 seconden
+#define _GLOW_TIME          500       // MilliSeconds
 
-volatile uint8_t  WDcounter;
-volatile bool     resetESP          = false;
-volatile uint8_t  interrupsReceived = 0;
-volatile uint32_t blinkTimer;
+volatile bool receivedInterrupt = false;
+uint8_t  WDcounter;
+uint8_t  feedsReceived = 0;
+uint32_t blinkTimer;
 
 //----------------------------------------------------------------
 void interruptSR(void) 
 {
-    WDcounter = 0;
-    interrupsReceived++;
-    if (interrupsReceived > 10)
-    {    
-      interrupsReceived = 11;
-      resetESP  = true;
-    }
-    digitalWrite(_PIN_SGNL_LED, HIGH);
-    blinkTimer = millis() + _GLOW_TIME;
+  receivedInterrupt = true;
     
 }   // interruptSR()
 
 
 //----------------------------------------------------------------
-void blinkLed(uint16_t onMS, uint16_t offMS, uint32_t durationMS)
+void blinkSgnlLed(uint16_t onMS, uint16_t offMS, uint32_t durationMS)
 {
   uint32_t  timeToGo = millis() + durationMS;
   
@@ -101,7 +96,7 @@ void blinkLed(uint16_t onMS, uint16_t offMS, uint32_t durationMS)
   }
   digitalWrite(_PIN_SGNL_LED, LOW);
   
-} // blinkLed()
+} // blinkSgnlLed()
 
 
 //----------------------------------------------------------------
@@ -139,17 +134,15 @@ void setup()
     }
     digitalWrite(_PIN_REL_LED, LOW); // begin met relays-led "off"
 
-    blinkLed(100, 900, 10000);
-    digitalWrite(_PIN_RELAYS,  HIGH); // activate relays ("on")
-    digitalWrite(_PIN_REL_LED, HIGH); // activate LED ("on")
-    
-    blinkLed(900, 100, 20000);
+    blinkSgnlLed(100, 900, _STARTUP_TIME);  // 25 seconds?
     digitalWrite(_PIN_SGNL_LED, LOW);
 
   //enableInterrupt(_PIN_INTERRUPT, interruptSR, RISING);
     enableInterrupt(_PIN_INTERRUPT, interruptSR, CHANGE);
 
-    WDcounter = 0;
+    receivedInterrupt = false;
+    WDcounter         = 0;
+    feedsReceived     = 0;
 
 } // setup()
 
@@ -157,24 +150,31 @@ void setup()
 //----------------------------------------------------------------
 void loop() 
 {
-  if (WDcounter <= 1)
+  if (receivedInterrupt)
   {
+    receivedInterrupt = false;
+    WDcounter         = 0;
+    feedsReceived++;
+    if (feedsReceived >= 3)
+    {    
+      //--- WDT is armed from now on
+      if (feedsReceived == 3)
+      {
+        blinkSgnlLed(50, 200, 2000);
+      }
+      feedsReceived = 4;
+      digitalWrite(_PIN_RELAYS,   HIGH);
+      digitalWrite(_PIN_REL_LED,  HIGH);
+    }
     digitalWrite(_PIN_SGNL_LED, HIGH);
     blinkTimer = millis() + _GLOW_TIME;
   }
-  
+
   if (WDcounter <= _MAX_HALF_SECONDS)
   {
-    if (resetESP) // get's true after 10 Feeds
+    if (millis() > blinkTimer)
     {
-      if (millis() > blinkTimer)
-      {
-        digitalWrite(_PIN_SGNL_LED, LOW);
-      }
-    }
-    else  // less than 10 feeds, so do not light PWM_LED
-    {
-      digitalWrite(_PIN_RELAYS,  HIGH);
+      digitalWrite(_PIN_SGNL_LED, LOW);
     }
   }
   else  // WDcounter > _MAX_HALF_SECONDS
@@ -185,26 +185,24 @@ void loop()
     digitalWrite(_PIN_RELAYS,   LOW);
     digitalWrite(_PIN_REL_LED,  LOW);
     digitalWrite(_PIN_SGNL_LED, LOW);
-    if (resetESP)   // we want to do this one time only!
-    {
-      disableInterrupt(_PIN_INTERRUPT);
-      WDcounter = 0;
-      digitalWrite(_PIN_RST_ESP, HIGH);
-      delay(500);
-      digitalWrite(_PIN_RST_ESP, LOW);
-      resetESP = false;
-      setup();
-    }
+    disableInterrupt(_PIN_INTERRUPT);
+    //--- now reset main processor
+    digitalWrite(_PIN_RST_ESP, HIGH);
+    delay(500);
+    digitalWrite(_PIN_RST_ESP,  LOW);
+    setup();
   }
 
+  //--- almost at the max time without a feed ..
   if (WDcounter > (_MAX_HALF_SECONDS - 4))
   {
-    blinkLed(100, 100, _HALF_A_SECOND);
+    blinkSgnlLed(100, 100, _HALF_A_SECOND);
   }
   else
   {
     delayMS(_HALF_A_SECOND);
   }
+  
   WDcounter++;
 
 } // loop()
