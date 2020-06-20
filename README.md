@@ -34,31 +34,32 @@ PB0 (DIL-5) outputs a signal to the [WDT-LED] (D2) which will, after every recei
    ------------+---------+---------------+------------------------------------
    Power On    | Blink   | Blink         | inversed from each other
                |         |               | Relays "Off"
+               |         |               | Next: "Fase 1"
    ------------+---------+---------------+------------------------------------
-   Init 1      | Off     | 900 MS On     | repeat for 10 seconds
+   Fase 1      | Off     | 900 MS On     | repeat for 25 seconds
                |         | 100 MS Off    | Relays "Off"
+               |         |               | Next: "Fase 2"
    ------------+---------+---------------+------------------------------------
-   Init 2      | On      |               | Relays "On"          
+   Fase 2      | Off     | 500 MS On     | wait for 3 Feeds to pass
+               |         | for every     | Relays "Off" 
+               |         | Feed received | Next: "Fase 3"
    ------------+---------+---------------+------------------------------------
-   Init 3      | On      | 100 MS On     | repeat for 20 seconds 
-               |         | 900 MS Off    | Relays are "On" 
-   ------------+---------+---------------+------------------------------------
-   Init 4      | On      | 500 MS On     | wait for 10 Feeds to pass
-               |         | for every     | Relays "On" 
-               |         | Feed received | 
+   Fase 3      | Off     | Blink Fast!   | wait for 3 Feeds to pass
+               |         | for 2 seconds | Relays "Off" 
+               |         |               | Next: "Normal Operation"
    ------------+---------+---------------+------------------------------------
    Normal      | On      | 500 MS On     | Relays "On"  
    Operation   |         | for every     | 
                |         | feed received | 
                |         +---------------+------------------------------------
                |         | Blink fast    | If no feed within 2 seconds: 
-               |         |               | "Alarm State" 
+               |         |               | Next: "Alarm State" 
                |         |               | else: "Normal Operation"
                |         |               | Relays "On"
    ------------+---------+---------------+------------------------------------
    Alarm State | Off     | Off           | Relays "Off"
                |         |               | Reset ESP8266
-               |         |               | Restart ATtinyWatchDog to 
-               |         |               | "Power On" state
-   ------------+---------+---------------+------------------------------------
+               |         |               | Restart ATtinyWatchDog 
+               |         |               | Next: "Power On" state
+   ------------+---------+---------------+------------------------------------  
 </pre>  
